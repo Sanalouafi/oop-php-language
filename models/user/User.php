@@ -1,96 +1,61 @@
 <?php
+
 include __DIR__ . "/../../connexion/connexion.php";
 session_start();
-
 class User
 {
-    public $username;
-    public $fullname;
-    public $password;
+    private $username;
+    private $fullname;
+    private $password;
     private $conn;
 
-    public function __construct($conn, $username, $fullname, $password)
+    public function __construct($username, $fullname, $password)
     {
-        $this->conn = $conn;
-        $this->username = $username;
-        $this->fullname = $fullname;
-        $this->password = $password;
+        $this->conn = DbHandler::connect();
+        $this->setUsername($username);
+        $this->setFullname($fullname);
+        $this->setPassword($password);
     }
 
-    public function registerUser()
+    public function createUser()
     {
-        $username = mysqli_real_escape_string($this->conn, $this->username);
-        $fullname = mysqli_real_escape_string($this->conn, $this->fullname);
-        $password = mysqli_real_escape_string($this->conn, $this->password);
+        $username = $this->getUsername();
+        $fullname = $this->getFullname();
+        $password = $this->getPassword();
 
-        // Validation
-        $username_error = $this->validateUsername($username);
-        $password_error = $this->validatePassword($password);
-        $fullname_error = $this->validateFullname($fullname);
+        $usernameError = $this->validateUsername($username);
+        $fullnameError = $this->validateFullname($fullname);
+        $passwordError = $this->validatePassword($password);
 
-        if (empty($username_error) && empty($fullname_error) && empty($password_error)) {
-            $hashpassword = password_hash($password, PASSWORD_DEFAULT);
+        if (!empty($usernameError) || !empty($fullnameError) || !empty($passwordError)) {
+            echo "Validation error: $usernameError $fullnameError $passwordError";
+            return false;
+        }
 
-            $query = "INSERT INTO user (username, fullname, password) VALUES ('$username','$fullname','$hashpassword')";
-            $result = mysqli_query($this->conn, $query);
+        $hashPassword = password_hash($password, PASSWORD_DEFAULT);
 
-            if ($result) {
-                $last_id = mysqli_insert_id($this->conn);
-                $query_role = "INSERT INTO user_role (user_id, role_id) VALUES ($last_id, 2)";
-                $result_role = mysqli_query($this->conn, $query_role);
+        $query = "INSERT INTO user (username, fullname, password) VALUES ('$username','$fullname','$hashPassword')";
+        $result = mysqli_query($this->conn, $query);
 
-                if ($result_role) {
-                    header("Location:../../views/auth/login.php");
-                    exit();
-                } else {
-                    echo "Error adding user role";
-                }
+        if ($result) {
+            $lastId = mysqli_insert_id($this->conn);
+            $queryRole = "INSERT INTO user_role (user_id, role_id) VALUES ($lastId, 2)";
+            $resultRole = mysqli_query($this->conn, $queryRole);
+
+            if ($resultRole) {
+                return true;
             } else {
-                echo "Error adding user";
+                echo "Error adding user role";
             }
+
+            return false;
+        } else {
+            echo "Error adding user";
         }
+
+        return false;
     }
 
-    public function loginUser()
-    {
-        $username = mysqli_real_escape_string($this->conn, $this->username);
-        $password = mysqli_real_escape_string($this->conn, $this->password);
-        $username_error = '';
-        $password_error = '';
-
-        // Validation
-        if (empty($username)) {
-            $username_error = 'Username is required';
-        }
-        $query_check = "SELECT * FROM user AS u INNER JOIN user_role AS ur ON u.id = ur.user_id INNER JOIN role AS r ON ur.role_id = r.id WHERE username='$username'";
-        $result_check = mysqli_query($this->conn, $query_check);
-        $rows = mysqli_fetch_assoc($result_check);
-
-        if (empty($username_error) && empty($password_error)) {
-            if (password_verify($password, $rows['password'])) {
-                $_SESSION['role'] = $rows['role_id'];
-
-                $this->redirectBasedOnRole($rows['role_id']);
-            } else {
-                $password_error = 'Incorrect password';
-            }
-        }
-    }
-
-    private function redirectBasedOnRole($role_id)
-    {
-        switch ($role_id) {
-            case 1:
-                header('Location:../../views/admin/dashboard.php');
-                exit();
-            case 2:
-                header('Location:../../views/user/home.php');
-                exit();
-            default:
-                echo "Unknown role";
-                break;
-        }
-    }
 
     private function validateUsername($username)
     {
@@ -98,11 +63,11 @@ class User
             return 'Username is required';
         }
 
-        $query_check = "SELECT * FROM user WHERE username='$username'";
-        $result_check = mysqli_query($this->conn, $query_check);
+        $queryCheck = "SELECT * FROM user WHERE username='$username'";
+        $resultCheck = mysqli_query($this->conn, $queryCheck);
 
-        if (mysqli_num_rows($result_check) > 0) {
-            return 'Username is invalid';
+        if (mysqli_num_rows($resultCheck) > 0) {
+            return 'Username is already taken';
         }
 
         return '';
@@ -117,5 +82,91 @@ class User
     {
         return empty($fullname) ? 'Fullname is required' : '';
     }
-}
 
+    public function getAllUsers()
+    {
+        $query = "SELECT u.*, r.name FROM user AS u INNER JOIN user_role AS ur ON u.id = ur.user_id INNER JOIN role AS r ON ur.role_id = r.id";
+        $result = mysqli_query($this->conn, $query);
+
+        if (!$result) {
+            echo "Error in query: " . mysqli_error($this->conn);
+            return false;
+        } else {
+            return $result;
+        }
+    }
+
+
+
+
+    public function getByUserName()
+    {
+        $username = $this->getUsername();
+        $password = $this->getPassword();
+
+        // Basic validation
+        $passwordError = $this->validatePassword($password);
+
+        if (!empty($passwordError)) {
+            // Validation failed
+            echo "Validation error: $passwordError";
+            return false;
+        }
+
+        $query = "SELECT u.*, ur.role_id, r.name FROM user AS u INNER JOIN user_role AS ur ON u.id = ur.user_id INNER JOIN role AS r ON ur.role_id = r.id WHERE username='$username'";
+        $result = mysqli_query($this->conn, $query);
+
+        if (!$result) {
+            echo "Error retrieving user: " . mysqli_error($this->conn);
+            return false;
+        }
+
+        $row = mysqli_fetch_assoc($result);
+
+        if (!$row) {
+            echo "User not found";
+            return false;
+        }
+
+        if (password_verify($password, $row['password'])) {
+            $_SESSION['role'] = $row['role_id'];
+
+            return true;
+        } else {
+            echo "Incorrect password";
+            return false;
+        }
+    }
+
+
+
+    public function getUsername()
+    {
+        return $this->username;
+    }
+
+    public function setUsername($username)
+    {
+        $this->username = mysqli_real_escape_string($this->conn, $username);
+    }
+
+    public function getFullname()
+    {
+        return $this->fullname;
+    }
+
+    public function setFullname($fullname)
+    {
+        $this->fullname = mysqli_real_escape_string($this->conn, $fullname);
+    }
+
+    public function getPassword()
+    {
+        return $this->password;
+    }
+
+    public function setPassword($password)
+    {
+        $this->password = mysqli_real_escape_string($this->conn, $password);
+    }
+}

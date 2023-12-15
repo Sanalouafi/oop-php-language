@@ -30,5 +30,4 @@ class DbHandler
     
 }
 
-$conn=DbHandler::connect();
 
